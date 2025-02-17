@@ -19424,7 +19424,8 @@ func HandleOpenId(resp http.ResponseWriter, request *http.Request) {
 
 		// Automated replacement
 		userInfoUrlSplit := strings.Split(org.SSOConfig.OpenIdAuthorization, "/")
-		userinfoEndpoint := strings.Join(userInfoUrlSplit[0:len(userInfoUrlSplit)-1], "/") + "/userinfo"
+		//userinfoEndpoint := strings.Join(userInfoUrlSplit[0:len(userInfoUrlSplit)-1], "/") + "/userinfo"
+		userinfoEndpoint := strings.Join(userInfoUrlSplit[0:len(userInfoUrlSplit)-3], "/") + "/oidc/v1/userinfo"
 		//userinfoEndpoint := strings.Replace(org.SSOConfig.OpenIdAuthorization, "/authorize", "/userinfo", -1)
 		log.Printf("Userinfo endpoint: %s", userinfoEndpoint)
 		client := &http.Client{}
