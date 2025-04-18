@@ -3,9 +3,7 @@ package shuffle
 import (
 	"archive/zip"
 	"bytes"
-	"time"
 	"context"
-	"runtime"
 	"crypto/md5"
 	"encoding/json"
 	"errors"
@@ -13,16 +11,18 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
+	"net/http"
 	"os"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
-	"net/http"
+	"time"
 
 	"cloud.google.com/go/storage"
-	"github.com/frikky/kin-openapi/openapi3"
 	docker "github.com/docker/docker/client"
+	"github.com/frikky/kin-openapi/openapi3"
 
 	//"github.com/satori/go.uuid"
 	"gopkg.in/yaml.v2"
@@ -87,7 +87,7 @@ func GetCorrectActionName(parsed string) string {
 
 	if strings.HasPrefix(parsed, "\"") {
 		parsed = parsed[1:]
-	} 
+	}
 
 	if strings.HasSuffix(parsed, "\"") {
 		parsed = parsed[:len(parsed)-1]
@@ -214,7 +214,6 @@ func getGithubFile(githubUrl string) ([]byte, error) {
 		}
 	}
 
-
 	// Load the data from this file and return.
 	resp, err := http.Get(githubUrl)
 	if err != nil {
@@ -262,7 +261,7 @@ func GetAppbase() ([]byte, []byte, error) {
 		// FIXME: Use an older commit of the file
 		githubUrl := "https://raw.githubusercontent.com/Shuffle/app_sdk/refs/heads/main/shuffle_sdk/shuffle_sdk.py"
 		content, err := getGithubFile(githubUrl)
-		return content, []byte{}, err 
+		return content, []byte{}, err
 
 		return []byte{}, []byte{}, err
 	}
@@ -275,11 +274,11 @@ func GetAppbaseGCP(ctx context.Context, client *storage.Client, bucketName strin
 	// 1. Have baseline in bucket/generated_apps/baseline
 	// 2. Copy the baseline to a new folder with identifier name
 
-	loadFromGithub := true 
+	loadFromGithub := true
 
 	basePath := "generated_apps/baseline"
 	reference := client.Bucket(bucketName).Object(fmt.Sprintf("%s/app_base.py", basePath))
-			
+
 	// Check if it's more than 1 month old
 	if reference != nil {
 		attrs, err := reference.Attrs(ctx)
@@ -296,7 +295,7 @@ func GetAppbaseGCP(ctx context.Context, client *storage.Client, bucketName strin
 		// FIXME: Use an older commit of the file
 		githubUrl := "https://raw.githubusercontent.com/Shuffle/app_sdk/refs/heads/main/shuffle_sdk/shuffle_sdk.py"
 		content, err := getGithubFile(githubUrl)
-		return content, []byte{}, err 
+		return content, []byte{}, err
 	}
 
 	appbase, err := reference.NewReader(ctx)
@@ -306,7 +305,7 @@ func GetAppbaseGCP(ctx context.Context, client *storage.Client, bucketName strin
 		// FIXME: Use an older commit of the file
 		githubUrl := "https://raw.githubusercontent.com/Shuffle/app_sdk/refs/heads/main/shuffle_sdk/shuffle_sdk.py"
 		content, err := getGithubFile(githubUrl)
-		return content, []byte{}, err 
+		return content, []byte{}, err
 	}
 
 	defer appbase.Close()
@@ -591,10 +590,8 @@ func MakePythoncode(swagger *openapi3.Swagger, name, url, method string, paramet
 
 			// Add: client_id and client_secret in body as JSON?
 
-
 			// ADD: accessToken = field
 			authenticationSetup = fmt.Sprintf("authret = requests.get(f\"{url}%s\", headers=request_headers, auth=(username_basic, password_basic), verify=False)\n        if 'access_token' in authret.text:\n            request_headers[\"Authorization\"] = f\"Bearer {authret.json()['access_token']}\"\n        elif 'jwt' in authret.text:\n            request_headers[\"Authorization\"] = f\"Bearer {authret.json()['jwt']}\"\n        elif 'accessToken' in authret.text:\n            request_headers[\"Authorization\"] = f\"Bearer {authret.json()['accessToken']}\"\n        else:\n            request_headers[\"Authorization\"] = f\"Bearer {authret.text}\"\n        print(f\"Found Bearer auth: {authret.text}\")", api.Authentication.TokenUri)
-			
 
 			//log.Printf("[DEBUG] Appending jwt code for authenticationSetup:\n        %s", authenticationSetup)
 		}
@@ -642,7 +639,7 @@ func MakePythoncode(swagger *openapi3.Swagger, name, url, method string, paramet
 		// This is gibberish :)
 		for _, param := range parameters {
 			if strings.Contains(param, "headers=") {
-				headerParserCode = "if len(headers) > 0:\n            for header in headers.split(\"\\n\"):\n                if ':' in header:\n                    headersplit=header.split(':')\n                    request_headers[headersplit[0].strip()] = ':'.join(headersplit[1:]).strip()\n                elif '=' in header:\n                    headersplit=header.split('=')\n                    request_headers[headersplit[0].strip()] = '='.join(headersplit[1:]).strip()"
+				headerParserCode = "if isinstance(headers, dict):\n            request_headers = headers\n        elif len(headers) > 0:\n            for header in str(headers).split(\"\\n\"):\n                if ':' in header:\n                    headersplit=header.split(':')\n                    request_headers[headersplit[0].strip()] = ':'.join(headersplit[1:]).strip()\n                elif '=' in header:\n                    headersplit=header.split('=')\n                    request_headers[headersplit[0].strip()] = '='.join(headersplit[1:]).strip()"
 
 			} else if strings.Contains(param, "queries=") {
 				queryParserCode = "\n        if len(queries) > 0:\n            if queries[0] == \"?\" or queries[0] == \"&\":\n                queries = queries[1:len(queries)]\n            if queries[len(queries)-1] == \"?\" or queries[len(queries)-1] == \"&\":\n                queries = queries[0:-1]\n            for query in queries.split(\"&\"):\n                 if isinstance(query, list) or isinstance(query, dict):\n                    try:\n                        query = json.dumps(query)\n                    except:\n                        pass\n                 if '=' in query:\n                    headersplit=query.split('=')\n                    params[requests.utils.quote(headersplit[0].strip())] = requests.utils.quote(headersplit[1].strip())\n                 else:\n                    params[requests.utils.quote(query.strip())] = None\n        params = '&'.join([k if v is None else f\"{k}={v}\" for k, v in params.items()])"
@@ -919,7 +916,7 @@ func MakePythoncode(swagger *openapi3.Swagger, name, url, method string, paramet
 	return functionname, data
 }
 
-func GetCustomActionCode(swagger *openapi3.Swagger, api WorkflowApp) string{	
+func GetCustomActionCode(swagger *openapi3.Swagger, api WorkflowApp) string {
 
 	authenticationParameter := ""
 	authenticationSetup := ""
@@ -939,7 +936,7 @@ func GetCustomActionCode(swagger *openapi3.Swagger, api WorkflowApp) string{
 			authenticationParameter = ", apikey"
 
 			if swagger.Components.SecuritySchemes["ApiKeyAuth"].Value.In == "header" {
-			
+
 				authenticationSetup = fmt.Sprintf(`if apikey != " ": parsed_headers["%s"] = apikey`, swagger.Components.SecuritySchemes["ApiKeyAuth"].Value.Name)
 
 				if len(swagger.Components.SecuritySchemes["ApiKeyAuth"].Value.Description) > 0 {
@@ -949,7 +946,7 @@ func GetCustomActionCode(swagger *openapi3.Swagger, api WorkflowApp) string{
 				}
 
 			} else if swagger.Components.SecuritySchemes["ApiKeyAuth"].Value.In == "query" {
-		
+
 				//authenticationSetup = fmt.Sprintf("if apikey != \" \": parsed_queries[\"%s\"] = requests.utils.quote(apikey)", swagger.Components.SecuritySchemes["ApiKeyAuth"].Value.Name)
 				trimmedDescription := strings.Trim(swagger.Components.SecuritySchemes["ApiKeyAuth"].Value.Description, " ")
 
@@ -957,7 +954,7 @@ func GetCustomActionCode(swagger *openapi3.Swagger, api WorkflowApp) string{
 			}
 
 		} else if swagger.Components.SecuritySchemes["Oauth2"] != nil {
-	
+
 			authenticationParameter = ", access_token"
 			authenticationSetup = fmt.Sprintf("if access_token != \" \": parsed_headers[\"Authorization\"] = f\"Bearer {access_token}\"\n        #parsed_headers[\"Content-Type\"] = \"application/json\"")
 
@@ -965,7 +962,7 @@ func GetCustomActionCode(swagger *openapi3.Swagger, api WorkflowApp) string{
 			authenticationParameter = ", username_basic, password_basic"
 			authenticationSetup = fmt.Sprintf("authret = requests.get(f\"{url}%s\", headers=parsed_headers, auth=(username_basic, password_basic), verify=False)\n        if 'access_token' in authret.text:\n            parsed_headers[\"Authorization\"] = f\"Bearer {authret.json()['access_token']}\"\n        elif 'jwt' in authret.text:\n            parsed_headers[\"Authorization\"] = f\"Bearer {authret.json()['jwt']}\"\n        elif 'accessToken' in authret.text:\n            parsed_headers[\"Authorization\"] = f\"Bearer {authret.json()['accessToken']}\"\n        else:\n            parsed_headers[\"Authorization\"] = f\"Bearer {authret.text}\"\n        print(f\"Found Bearer auth: {authret.text}\")", api.Authentication.TokenUri)
 		}
-		
+
 	}
 
 	pythonCode := fmt.Sprintf(`		
@@ -1184,7 +1181,7 @@ func AddCustomAction(swagger *openapi3.Swagger, api WorkflowApp) (WorkflowAppAct
 				},
 			})
 		} else if securitySchemes["ApiKeyAuth"] != nil {
-			
+
 			extraParam := WorkflowAppActionParameter{
 				Name:          "apikey",
 				Description:   "The apikey to use",
@@ -1255,80 +1252,79 @@ func AddCustomAction(swagger *openapi3.Swagger, api WorkflowApp) (WorkflowAppAct
 	}
 
 	parameters = append(parameters, WorkflowAppActionParameter{
-		Name:          "method",
-		Description:   "The http method to use",
-		Multiline:     false,
-		Required:      true,
-		Options:       []string{"GET","POST","PUT","DELETE","PATCH"},
-		Example:       "GET",
-		Schema: SchemaDefinition{
-			Type: "string",
-		},
-	})
-	
-	parameters = append(parameters, WorkflowAppActionParameter{
-		Name:          "url",
-		Description:   "The URL of the API",
-		Multiline:     false,
-		Required:      true,
-		Example:       "https://api.example.com",
+		Name:        "method",
+		Description: "The http method to use",
+		Multiline:   false,
+		Required:    true,
+		Options:     []string{"GET", "POST", "PUT", "DELETE", "PATCH"},
+		Example:     "GET",
 		Schema: SchemaDefinition{
 			Type: "string",
 		},
 	})
 
 	parameters = append(parameters, WorkflowAppActionParameter{
-		Name:          "path",
-		Description:   "the path to add to the base url",
-		Multiline:     false,
-		Required:      false,
-		Example:       "/users/profile",
+		Name:        "url",
+		Description: "The URL of the API",
+		Multiline:   false,
+		Required:    true,
+		Example:     "https://api.example.com",
 		Schema: SchemaDefinition{
 			Type: "string",
 		},
 	})
 
 	parameters = append(parameters, WorkflowAppActionParameter{
-		Name:          "headers",
-		Description:   "Add or edit headers",
-		Multiline:     true,
-		Required:      false,
-		Example:       "Content-Type:application/json\nAccept:application/json",
+		Name:        "path",
+		Description: "the path to add to the base url",
+		Multiline:   false,
+		Required:    false,
+		Example:     "/users/profile",
 		Schema: SchemaDefinition{
 			Type: "string",
 		},
 	})
 
 	parameters = append(parameters, WorkflowAppActionParameter{
-		Name:          "queries",
-		Description:   "Add or edit queries",
-		Multiline:     true,
-		Required:      false,
-		Example: "view=basic&redirect=test",
-		Schema: SchemaDefinition{
-			Type: "string",
-		},
-	})
-
-
-	parameters = append(parameters, WorkflowAppActionParameter{
-		Name:          "ssl_verify",
-		Description:   "Check if you want to verify request",
-		Multiline:     false,
-		Options:       []string{"False","True"},
-		Required:      false,
-		Example:       "False",
+		Name:        "headers",
+		Description: "Add or edit headers",
+		Multiline:   true,
+		Required:    false,
+		Example:     "Content-Type:application/json\nAccept:application/json",
 		Schema: SchemaDefinition{
 			Type: "string",
 		},
 	})
 
 	parameters = append(parameters, WorkflowAppActionParameter{
-		Name:          "body",
-		Description:   "The body to use",
-		Multiline:     true,
-		Required:      false,
-		Example:      `{"username": "example_user", "email": "user@example.com"}`,
+		Name:        "queries",
+		Description: "Add or edit queries",
+		Multiline:   true,
+		Required:    false,
+		Example:     "view=basic&redirect=test",
+		Schema: SchemaDefinition{
+			Type: "string",
+		},
+	})
+
+	parameters = append(parameters, WorkflowAppActionParameter{
+		Name:        "ssl_verify",
+		Description: "Check if you want to verify request",
+		Multiline:   false,
+		Options:     []string{"False", "True"},
+		Required:    false,
+		Example:     "False",
+		Schema: SchemaDefinition{
+			Type: "string",
+		},
+	})
+
+	parameters = append(parameters, WorkflowAppActionParameter{
+		Name:        "body",
+		Description: "The body to use",
+		Multiline:   true,
+		Required:    false,
+		Example:     `{"username": "example_user", "email": "user@example.com"}`,
 		Schema: SchemaDefinition{
 			Type: "string",
 		},
@@ -1540,7 +1536,6 @@ func GenerateYaml(swagger *openapi3.Swagger, newmd5 string) (*openapi3.Swagger, 
 					log.Printf("[DEBUG] Set up Oauth2 config for app %s during generation", api.Name)
 					api.Authentication.Type = "oauth2"
 
-
 					api.Authentication.RedirectUri = parsed.AuthorizationCode.AuthorizationUrl
 					api.Authentication.TokenUri = parsed.AuthorizationCode.TokenUrl
 					api.Authentication.RefreshUri = parsed.AuthorizationCode.RefreshUrl
@@ -1561,7 +1556,7 @@ func GenerateYaml(swagger *openapi3.Swagger, newmd5 string) (*openapi3.Swagger, 
 				}
 
 				// November 2023: password & client_credentials
-				// Fix mar 2024: set type to oauth2-app 
+				// Fix mar 2024: set type to oauth2-app
 				if len(newValue) > 0 {
 					api.Authentication.GrantType = newValue
 					api.Authentication.Type = "oauth2-app"
@@ -1583,17 +1578,17 @@ func GenerateYaml(swagger *openapi3.Swagger, newmd5 string) (*openapi3.Swagger, 
 			})
 
 			/*
-			api.Authentication.Parameters = append(api.Authentication.Parameters, AuthenticationParams{
-				Name:        "client_id",
-				Value:       "",
-				Example:     "client_id",
-				Description: securitySchemes["Oauth2"].Value.Description,
-				In:          securitySchemes["Oauth2"].Value.In,
-				Scheme:      securitySchemes["Oauth2"].Value.Scheme,
-				Schema: SchemaDefinition{
-					Type: securitySchemes["Oauth2"].Value.Scheme,
-				},
-			})
+				api.Authentication.Parameters = append(api.Authentication.Parameters, AuthenticationParams{
+					Name:        "client_id",
+					Value:       "",
+					Example:     "client_id",
+					Description: securitySchemes["Oauth2"].Value.Description,
+					In:          securitySchemes["Oauth2"].Value.In,
+					Scheme:      securitySchemes["Oauth2"].Value.Scheme,
+					Schema: SchemaDefinition{
+						Type: securitySchemes["Oauth2"].Value.Scheme,
+					},
+				})
 			*/
 
 			api.Authentication.Parameters = append(api.Authentication.Parameters, AuthenticationParams{
@@ -1828,8 +1823,7 @@ func GenerateYaml(swagger *openapi3.Swagger, newmd5 string) (*openapi3.Swagger, 
 			Type: "string",
 		},
 	})
-    
-	
+
 	// Fixing parameters with :
 	newExtraParams := []WorkflowAppActionParameter{}
 	newOptionalParams := []WorkflowAppActionParameter{}
@@ -1891,7 +1885,6 @@ func GenerateYaml(swagger *openapi3.Swagger, newmd5 string) (*openapi3.Swagger, 
 			api.Actions = append(api.Actions, action)
 			pythonFunctions = append(pythonFunctions, curCode)
 		}
-
 
 		// Has to be here because its used differently above.
 		// FIXING this is done during export instead?
@@ -2127,7 +2120,7 @@ func FixParamname(paramname string) string {
 	paramname = strings.Replace(paramname, " ", "_", -1)
 	paramname = strings.Replace(paramname, "-", "_", -1)
 
-	return paramname 
+	return paramname
 }
 
 // FIXME:
@@ -2239,7 +2232,7 @@ func HandleConnect(swagger *openapi3.Swagger, api WorkflowApp, extraParameters [
 
 	if strings.Contains(baseUrl, "_shuffle_replace_") {
 		//log.Printf("[DEBUG] : %s", baseUrl)
-		m := regexp.MustCompile(`_shuffle_replace_\d`)
+		m := regexp.MustCompile(`_shuffle_replace_\d+`)
 		baseUrl = m.ReplaceAllString(baseUrl, "")
 	}
 
@@ -2291,6 +2284,13 @@ func HandleConnect(swagger *openapi3.Swagger, api WorkflowApp, extraParameters [
 			parsedName = ValidateParameterName(parsedName)
 			param.Value.Name = parsedName
 			path.Connect.Parameters[counter].Value.Name = parsedName
+
+			// Force it as a string to avoid nil-pointer
+			if param.Value.Schema.Value == nil {
+				param.Value.Schema.Value = &openapi3.Schema{
+					Type: "string",
+				}
+			}
 
 			curParam := WorkflowAppActionParameter{
 				Name:        parsedName,
@@ -2436,7 +2436,7 @@ func HandleGet(swagger *openapi3.Swagger, api WorkflowApp, extraParameters []Wor
 
 	if strings.Contains(baseUrl, "_shuffle_replace_") {
 		//log.Printf("[DEBUG] : %s", baseUrl)
-		m := regexp.MustCompile(`_shuffle_replace_\d`)
+		m := regexp.MustCompile(`_shuffle_replace_\d+`)
 		baseUrl = m.ReplaceAllString(baseUrl, "")
 	}
 
@@ -2499,6 +2499,13 @@ func HandleGet(swagger *openapi3.Swagger, api WorkflowApp, extraParameters []Wor
 			parsedName = ValidateParameterName(parsedName)
 			param.Value.Name = parsedName
 			path.Get.Parameters[counter].Value.Name = parsedName
+
+			// Force it as a string to avoid nil-pointer
+			if param.Value.Schema.Value == nil {
+				param.Value.Schema.Value = &openapi3.Schema{
+					Type: "string",
+				}
+			}
 
 			curParam := WorkflowAppActionParameter{
 				Name:        parsedName,
@@ -2645,7 +2652,7 @@ func HandleHead(swagger *openapi3.Swagger, api WorkflowApp, extraParameters []Wo
 
 	if strings.Contains(baseUrl, "_shuffle_replace_") {
 		//log.Printf("[DEBUG] : %s", baseUrl)
-		m := regexp.MustCompile(`_shuffle_replace_\d`)
+		m := regexp.MustCompile(`_shuffle_replace_\d+`)
 		baseUrl = m.ReplaceAllString(baseUrl, "")
 	}
 
@@ -2695,6 +2702,13 @@ func HandleHead(swagger *openapi3.Swagger, api WorkflowApp, extraParameters []Wo
 			parsedName = ValidateParameterName(parsedName)
 			param.Value.Name = parsedName
 			path.Head.Parameters[counter].Value.Name = parsedName
+
+			// Force it as a string to avoid nil-pointer
+			if param.Value.Schema.Value == nil {
+				param.Value.Schema.Value = &openapi3.Schema{
+					Type: "string",
+				}
+			}
 
 			curParam := WorkflowAppActionParameter{
 				Name:        parsedName,
@@ -2839,7 +2853,7 @@ func HandleDelete(swagger *openapi3.Swagger, api WorkflowApp, extraParameters []
 
 	if strings.Contains(baseUrl, "_shuffle_replace_") {
 		//log.Printf("[DEBUG] : %s", baseUrl)
-		m := regexp.MustCompile(`_shuffle_replace_\d`)
+		m := regexp.MustCompile(`_shuffle_replace_\d+`)
 		baseUrl = m.ReplaceAllString(baseUrl, "")
 	}
 
@@ -2909,6 +2923,13 @@ func HandleDelete(swagger *openapi3.Swagger, api WorkflowApp, extraParameters []
 			param.Value.Name = parsedName
 			path.Delete.Parameters[counter].Value.Name = parsedName
 
+			// Force it as a string to avoid nil-pointer
+			if param.Value.Schema.Value == nil {
+				param.Value.Schema.Value = &openapi3.Schema{
+					Type: "string",
+				}
+			}
+
 			curParam := WorkflowAppActionParameter{
 				Name:        parsedName,
 				Description: param.Value.Description,
@@ -2935,7 +2956,7 @@ func HandleDelete(swagger *openapi3.Swagger, api WorkflowApp, extraParameters []
 					}
 				}
 			}
-			
+
 			if val, ok := param.Value.ExtensionProps.Extensions["multiline"]; ok {
 				j, err := json.Marshal(&val)
 				if err == nil {
@@ -3053,7 +3074,7 @@ func HandlePost(swagger *openapi3.Swagger, api WorkflowApp, extraParameters []Wo
 	baseUrl := fmt.Sprintf("%s%s", api.Link, actualPath)
 	if strings.Contains(baseUrl, "_shuffle_replace_") {
 		//log.Printf("[DEBUG] : %s", baseUrl)
-		m := regexp.MustCompile(`_shuffle_replace_\d`)
+		m := regexp.MustCompile(`_shuffle_replace_\d+`)
 		baseUrl = m.ReplaceAllString(baseUrl, "")
 	}
 
@@ -3154,6 +3175,13 @@ func HandlePost(swagger *openapi3.Swagger, api WorkflowApp, extraParameters []Wo
 			param.Value.Name = parsedName
 			path.Post.Parameters[counter].Value.Name = parsedName
 
+			// Force it as a string to avoid nil-pointer
+			if param.Value.Schema.Value == nil {
+				param.Value.Schema.Value = &openapi3.Schema{
+					Type: "string",
+				}
+			}
+
 			curParam := WorkflowAppActionParameter{
 				Name:        parsedName,
 				Description: param.Value.Description,
@@ -3180,7 +3208,6 @@ func HandlePost(swagger *openapi3.Swagger, api WorkflowApp, extraParameters []Wo
 					}
 				}
 			}
-
 
 			if val, ok := param.Value.ExtensionProps.Extensions["multiline"]; ok {
 				j, err := json.Marshal(&val)
@@ -3340,7 +3367,7 @@ func HandlePatch(swagger *openapi3.Swagger, api WorkflowApp, extraParameters []W
 	action.Returns.Schema.Type = "string"
 	if strings.Contains(baseUrl, "_shuffle_replace_") {
 		//log.Printf("[DEBUG] : %s", baseUrl)
-		m := regexp.MustCompile(`_shuffle_replace_\d`)
+		m := regexp.MustCompile(`_shuffle_replace_\d+`)
 		baseUrl = m.ReplaceAllString(baseUrl, "")
 	}
 	handleFile := false
@@ -3370,6 +3397,13 @@ func HandlePatch(swagger *openapi3.Swagger, api WorkflowApp, extraParameters []W
 			parsedName = ValidateParameterName(parsedName)
 			param.Value.Name = parsedName
 			path.Patch.Parameters[counter].Value.Name = parsedName
+
+			// Force it as a string to avoid nil-pointer
+			if param.Value.Schema.Value == nil {
+				param.Value.Schema.Value = &openapi3.Schema{
+					Type: "string",
+				}
+			}
 
 			curParam := WorkflowAppActionParameter{
 				Name:        parsedName,
@@ -3514,7 +3548,7 @@ func HandlePut(swagger *openapi3.Swagger, api WorkflowApp, extraParameters []Wor
 
 	if strings.Contains(baseUrl, "_shuffle_replace_") {
 		//log.Printf("[DEBUG] : %s", baseUrl)
-		m := regexp.MustCompile(`_shuffle_replace_\d`)
+		m := regexp.MustCompile(`_shuffle_replace_\d+`)
 		baseUrl = m.ReplaceAllString(baseUrl, "")
 	}
 
@@ -3583,6 +3617,13 @@ func HandlePut(swagger *openapi3.Swagger, api WorkflowApp, extraParameters []Wor
 			parsedName = ValidateParameterName(parsedName)
 			param.Value.Name = parsedName
 			path.Put.Parameters[counter].Value.Name = parsedName
+
+			// Force it as a string to avoid nil-pointer
+			if param.Value.Schema.Value == nil {
+				param.Value.Schema.Value = &openapi3.Schema{
+					Type: "string",
+				}
+			}
 
 			curParam := WorkflowAppActionParameter{
 				Name:        parsedName,
@@ -3721,7 +3762,7 @@ func HandlePut(swagger *openapi3.Swagger, api WorkflowApp, extraParameters []Wor
 }
 
 func GetAppRequirements() string {
-	return "requests==2.32.3\nurllib3==2.3.0\nliquidpy==0.8.2\nMarkupSafe==3.0.2\nflask[async]==3.1.0\npython-dateutil==2.9.0.post0\nPyJWT==2.10.1\nshufflepy==0.0.7\nshuffle-sdk==0.0.11\n"
+	return "requests==2.32.3\nurllib3==2.3.0\nliquidpy==0.8.2\nMarkupSafe==3.0.2\nflask[async]==3.1.0\npython-dateutil==2.9.0.post0\nPyJWT==2.10.1\ncryptography==44.0.2\nshufflepy==0.1.0\nshuffle-sdk==0.0.25"
 }
 
 // Removes JSON values from the input
@@ -3743,7 +3784,7 @@ func RemoveJsonValues(input []byte, depth int64) ([]byte, string, error) {
 
 	sort.Strings(keys)
 
-	// Iterate over the map[string]interface{} and remove the values 
+	// Iterate over the map[string]interface{} and remove the values
 	for _, k := range keys {
 		keyToken += k
 		// Get the value of the key as a map[string]interface{}
@@ -3856,9 +3897,19 @@ func RemoveJsonValues(input []byte, depth int64) ([]byte, string, error) {
 func DownloadDockerImageBackend(topClient *http.Client, imageName string) error {
 	// Check environment SHUFFLE_AUTO_IMAGE_DOWNLOAD
 	if os.Getenv("SHUFFLE_AUTO_IMAGE_DOWNLOAD") == "false" {
-		log.Printf("[DEBUG] SHUFFLE_AUTO_IMAGE_DOWNLOAD is false. Not downloading image %s", imageName)
+		log.Printf("[DEBUG] SHUFFLE_AUTO_IMAGE_DOWNLOAD is false. NOT downloading image %s", imageName)
 		return nil
 	}
+
+	// Remove from downloadedImages after 5 minutes for a redownload
+	time.AfterFunc(time.Minute*5, func() {
+		for i, img := range downloadedImages {
+			if img == imageName {
+				downloadedImages = append(downloadedImages[:i], downloadedImages[i+1:]...)
+				//log.Printf("[DEBUG] Removed image %s from downloaded images after 10 minutes, as to allow re-downloads.", imageName)
+			}
+		}
+	})
 
 	if ArrayContains(downloadedImages, imageName) && project.Environment == "worker" {
 		log.Printf("[DEBUG] Image %s already downloaded - not re-downloading. This only applies to workers.", imageName)
@@ -3866,30 +3917,60 @@ func DownloadDockerImageBackend(topClient *http.Client, imageName string) error 
 	}
 
 	baseUrl := os.Getenv("BASE_URL")
-	log.Printf("[DEBUG] Trying to download image %s from backend %s as it doesn't exist", imageName, baseUrl)
+	//log.Printf("[DEBUG] Trying to download image %s from backend %s as it doesn't exist", imageName, baseUrl)
 
 	if !ArrayContains(downloadedImages, imageName) {
 		downloadedImages = append(downloadedImages, imageName)
 	}
 
-
-	//data := fmt.Sprintf(`{"name": "%s"}`, imageName)
 	dockerImgUrl := fmt.Sprintf("%s/api/v1/get_docker_image?image=%s", baseUrl, strings.Replace(imageName, " ", "-", -1))
 
+	isCloudDownload := false
+	if strings.Contains(baseUrl, "ngrok") || strings.Contains(baseUrl, "shuffler.io") || strings.Contains(baseUrl, ".run.app") {
+		log.Printf("[DEBUG] Downloading as GET request with redirects")
+		dockerImgUrl = fmt.Sprintf("%s/api/v1/get_docker_image?image=%s", baseUrl, strings.Replace(imageName, " ", "-", -1))
+		isCloudDownload = true
+	} else {
+		//log.Printf("[DEBUG] Downloading image as POST request WITHOUT redirects due to not being cloud")
+	}
+
 	// Set request timeout to 5 min (max)
-	topClient.Timeout = time.Minute * 5
-
+	topClient.Timeout = time.Minute * 10
 	arch := runtime.GOARCH
-
 	if strings.Contains(strings.ToLower(arch), "arm") {
-		dockerImgUrl = fmt.Sprintf("%s&arch=%s", dockerImgUrl, arch)
+		if strings.Contains(dockerImgUrl, "?") {
+			dockerImgUrl = fmt.Sprintf("%s&arch=%s", dockerImgUrl, arch)
+		} else {
+			dockerImgUrl = fmt.Sprintf("%s?arch=%s", dockerImgUrl, arch)
+		}
+	}
+
+	relevantBody := DockerRequestCheck{
+		Name: strings.Replace(imageName, " ", "-", -1),
+	}
+
+	marshalledBody, err := json.Marshal(relevantBody)
+	if err != nil {
+		log.Printf("[ERROR] Failed to marshal body to be sent: %s", err)
+		return err
 	}
 
 	req, err := http.NewRequest(
-		"GET",
+		"POST",
 		dockerImgUrl,
-		nil,
+		bytes.NewBuffer(marshalledBody),
 	)
+
+	if err != nil {
+		log.Printf("[ERROR] Failed to create request for %s: %s", imageName, err)
+		return err
+	}
+
+	if isCloudDownload {
+		log.Printf("[DEBUG] Running GET request for cloud download for URL %s", dockerImgUrl)
+		req.Method = "GET"
+		req.Body = nil
+	}
 
 	// Specific to the worker
 	authorization := os.Getenv("AUTHORIZATION")
@@ -3899,7 +3980,7 @@ func DownloadDockerImageBackend(topClient *http.Client, imageName string) error 
 		// Specific to Orborus auth (org + auth) -> environment auth
 		authorization = os.Getenv("AUTH")
 		if len(authorization) > 0 {
-			log.Printf("[DEBUG] Found Orborus environment auth - adding to header.")
+			//log.Printf("[DEBUG] Found Orborus environment auth - adding to header.")
 			req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", authorization))
 
 			org := os.Getenv("ORG")
@@ -3918,9 +3999,13 @@ func DownloadDockerImageBackend(topClient *http.Client, imageName string) error 
 		return err
 	}
 
+	if newresp.Request.URL.String() != dockerImgUrl {
+		log.Printf("[DEBUG] Redirected download URL: %s -> %s", dockerImgUrl, newresp.Request.URL.String())
+	}
+
 	defer newresp.Body.Close()
 	if newresp.StatusCode != 200 {
-		log.Printf("[ERROR] Docker download for image %s (backend) StatusCode (1): %d", imageName, newresp.StatusCode)
+		//log.Printf("[ERROR] Docker download for image %s (backend) StatusCode (1): %d", imageName, newresp.StatusCode)
 		return errors.New(fmt.Sprintf("Failed to get image - status code %d", newresp.StatusCode))
 	}
 
@@ -3936,29 +4021,31 @@ func DownloadDockerImageBackend(topClient *http.Client, imageName string) error 
 	defer tar.Close()
 	_, err = io.Copy(tar, newresp.Body)
 	if err != nil {
-		log.Printf("[WARNING] Failed response body copying: %s", err)
+		log.Printf("[ERROR] Failed response body copying for file %s: %s", newFileName, err)
 		return err
 	}
-	tar.Seek(0, 0)
 
+	tar.Seek(0, 0)
 	dockercli, err := docker.NewEnvClient()
 	if err != nil {
 		log.Printf("[ERROR] Unable to create docker client (3): %s", err)
 		return err
 	}
 
+	//log.Printf("[DEBUG] Starting to load zip file for image %s. This is a background process and may take a while.", imageName)
+	//imageLoadResponse, err := dockercli.ImageLoad(context.Background(), tar, true)
 	defer dockercli.Close()
-
-	imageLoadResponse, err := dockercli.ImageLoad(context.Background(), tar, true)
+	imageLoadResponse, err := dockercli.ImageLoad(context.Background(), tar)
 	if err != nil {
-		log.Printf("[ERROR] Error loading images: %s", err)
+		log.Printf("[ERROR] Failed loading docker images: %s", err)
 		return err
 	}
 
+	//log.Printf("[DEBUG] Finished loading zip file for image %s", imageName)
 	defer imageLoadResponse.Body.Close()
 	body, err := ioutil.ReadAll(imageLoadResponse.Body)
 	if err != nil {
-		log.Printf("[ERROR] Error reading: %s", err)
+		log.Printf("[ERROR] Failed reading docker image: %s", err)
 		return err
 	}
 
@@ -3967,7 +4054,6 @@ func DownloadDockerImageBackend(topClient *http.Client, imageName string) error 
 	}
 
 	os.Remove(newFileName)
-
 	if strings.Contains(strings.ToLower(string(body)), "error") {
 		log.Printf("[ERROR] Error loading image %s: %s", imageName, string(body))
 		return errors.New(string(body))
@@ -3976,7 +4062,7 @@ func DownloadDockerImageBackend(topClient *http.Client, imageName string) error 
 	baseTag := strings.Split(imageName, ":")
 	if len(baseTag) > 1 {
 		tag := baseTag[1]
-		log.Printf("[DEBUG] Creating tag copies of downloaded containers from tag %s", tag)
+		//log.Printf("[DEBUG] Creating tag copies of downloaded containers from tag %s", tag)
 
 		// Remapping
 		ctx := context.Background()
@@ -3988,6 +4074,81 @@ func DownloadDockerImageBackend(topClient *http.Client, imageName string) error 
 
 	}
 
-	log.Printf("[INFO] Successfully loaded image %s: %s", imageName, string(body))
+	//log.Printf("[INFO] Successfully loaded image %s: %s", imageName, string(body))
+
 	return nil
+}
+
+func GetAppNameSplit(version DockerRequestCheck) (string, string, string, error) {
+	if len(version.Image) > 0 && len(version.Name) == 0 {
+		version.Name = version.Image
+	}
+
+	if len(version.Name) == 0 {
+		return "", "", "", errors.New("No image name found")
+	}
+
+	identifier := strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(version.Name, "_", "-"), ".", "-"))
+	if strings.Contains(identifier, ":") {
+		identifier = strings.Split(identifier, ":")[1]
+	}
+
+	appname := version.Name
+	appnameSplit := strings.Split(version.Name, ":")
+	if len(appnameSplit) > 1 {
+		appname = appnameSplit[1]
+	}
+
+	appId := ""
+	appnameSplit2 := strings.Split(appname, ".")
+	appnameSplit3 := strings.Split(appname, "_")
+	if len(appnameSplit2) <= 2 {
+
+		// Check last item of app split on _ if it's an md5
+		if len(appnameSplit3) > 1 && len(appnameSplit3[len(appnameSplit3)-1]) == 32 {
+			appId = appnameSplit3[len(appnameSplit3)-1]
+
+			// Remove the md5 from the appname
+			appname = strings.Join(appnameSplit3[0:len(appnameSplit3)-1], "_")
+
+		} else {
+			err := errors.New(fmt.Sprintf("Invalid image appname format: %s", version.Name))
+			return "", "", "", err 
+		}
+	}
+
+	baseAppname := appnameSplit2[0][0 : len(appnameSplit2[0])-2]
+
+	// In case of a weird version name/number that is not semantic
+	if len(appnameSplit2) > 3 {
+		// JUST remove the LAST dot parts
+		newstring := ""
+		for cnt, part := range appnameSplit2 {
+			if cnt > len(appnameSplit2)-2 {
+				continue
+			}
+
+			newstring += part + "."
+		}
+
+		// Removes the last _1 of _1.0.0 (or similar) in versions
+		baseAppname = newstring[0 : len(newstring)-5]
+	}
+
+	log.Printf("%#v - BASEAPPNAME: %#v, %#v", appname, baseAppname, appnameSplit2)
+
+	// Check if baseAppname ends with _<md5> and if so, remove it
+	if len(appId) > 0 {
+		// Remove appId from baseAppname by removing last _<md5> part
+		baseAppname = strings.Join(appnameSplit3[0:len(appnameSplit3)-1], "_")
+	}
+
+	appVersion := ""
+	if len(appnameSplit2) >= 2 {
+		appVersion = appnameSplit2[0][len(appnameSplit2[0])-1:] + "." + strings.Join(appnameSplit2[1:], ".")
+	}
+
+	appname = strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(appname, "_", "-"), ".", "-"))
+
+	return appname, baseAppname, appVersion, nil
 }
